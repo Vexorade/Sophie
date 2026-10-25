@@ -123,7 +123,7 @@ async function uploadImage(file, maxSide = 1400) {
 }
 
 const state = { tab: 'dashboard', catalog: null, orderFilter: 'todos', period: '30', range: null };
-const TABS = [['dashboard', 'Dashboard'], ['pedidos', 'Pedidos'], ['productos', 'Productos'], ['telas', 'Telas y colores'], ['patas', 'Maderas y patas'], ['config', 'Configuración']];
+const TABS = [['dashboard', 'Dashboard'], ['pedidos', 'Pedidos'], ['productos', 'Productos'], ['telas', 'Telas y colores'], ['patas', 'Maderas y patas'], ['config', 'Configuración'], ['sitio', 'Sitio y redes']];
 const PERIODS = [['hoy', 'Hoy'], ['7', 'Últimos 7 días'], ['30', 'Últimos 30 días'], ['mes', 'Este mes'], ['anio', 'Este año'], ['todo', 'Todo'], ['custom', 'Personalizado']];
 
 function nav() {
@@ -137,7 +137,7 @@ async function go(tab, arg) {
   app.replaceChildren(h('p', { class: 'muted' }, 'Cargando…'));
   try {
     if (!state.catalog || tab !== 'pedidos' && tab !== 'dashboard') state.catalog = await api('/api/admin/catalog');
-    const views = { dashboard: viewDashboard, pedidos: viewOrders, productos: viewProducts, telas: viewFabrics, patas: viewLegs, config: viewSettings };
+    const views = { dashboard: viewDashboard, pedidos: viewOrders, productos: viewProducts, telas: viewFabrics, patas: viewLegs, config: viewSettings, sitio: viewSite };
     await views[tab](arg);
   } catch (e) {
     app.replaceChildren(h('div', { class: 'msg err' }, e.message));
@@ -227,8 +227,9 @@ async function viewOrders() {
   const filterBtns = [['todos', 'Todos'], ['nuevo', 'Nuevos'], ['aceptado', 'Aceptados'], ['entregado', 'Entregados'], ['rechazado', 'Rechazados']]
     .map(([k, t]) => h('button', { class: f === k ? 'on' : '', onclick: () => { state.orderFilter = k; go('pedidos'); } }, t));
   const rowFor = (o) => {
-    const p = o.product, s = o.selection;
-    const colors = p.colorMode === 'split' ? `${p.colorLeft.name} (izq.) · ${p.colorRight.name} (der.)` : p.colorLeft.name;
+    const p = o.product || {}, s = o.selection || {}, c = o.customer || {};
+    const L = p.colorLeft || {}, R = p.colorRight || {};
+    const colors = p.colorMode === 'split' ? `${L.name || '—'} (izq.) · ${R.name || '—'} (der.)` : (L.name || '—');
     const pending = o.status === 'awaiting_transfer';
     const actions = [];
     if (o.fulfillment === 'nuevo' || o.fulfillment === 'rechazado') actions.push(h('button', { class: 'p', onclick: () => act(o, 'accept') }, 'Aceptar'));
@@ -239,15 +240,15 @@ async function viewOrders() {
     const fb = FULFILL[o.fulfillment] || [o.fulfillment, ''];
     return h('tr', {},
       h('td', { class: 'small' }, new Date(o.createdAt).toLocaleString('es-AR')),
-      h('td', {}, h('b', {}, o.product.name), h('div', { class: 'small muted' }, o.product.size),
-        s.orientation ? h('div', { class: 'small' }, 'Orientación: ' + o.product.orientation) : null,
-        h('div', { class: 'small' }, colors), o.product.leg ? h('div', { class: 'small' }, 'Patas: ' + o.product.leg) : null),
-      h('td', { class: 'small' }, h('b', {}, o.customer.name), h('div', {}, o.customer.email),
-        o.customer.phone ? h('div', {}, o.customer.phone) : null, o.customer.dni ? h('div', {}, 'DNI ' + o.customer.dni) : null,
-        o.customer.delivery === 'shipping' ? h('div', {}, 'Envío: ' + (o.customer.address || '')) : h('div', {}, 'Retiro en local')),
+      h('td', {}, h('b', {}, p.name), h('div', { class: 'small muted' }, p.size),
+        s.orientation ? h('div', { class: 'small' }, 'Orientación: ' + p.orientation) : null,
+        h('div', { class: 'small' }, colors), p.leg ? h('div', { class: 'small' }, 'Patas: ' + p.leg) : null),
+      h('td', { class: 'small' }, h('b', {}, c.name), h('div', {}, c.email),
+        c.phone ? h('div', {}, c.phone) : null, c.dni ? h('div', {}, 'DNI ' + c.dni) : null,
+        c.delivery === 'shipping' ? h('div', {}, 'Envío: ' + (c.address || '')) : h('div', {}, 'Retiro en local')),
       h('td', {}, h('span', { class: 'badge ' + fb[1] }, fb[0]), h('div', {}, h('span', { class: 'badge' }, STATUS[o.status] || o.status)),
         o.fulfillment === 'rechazado' && o.rejectReason ? h('div', { class: 'small muted' }, o.rejectReason) : null),
-      h('td', {}, h('div', {}, money(o.amount)), h('div', { class: 'small muted' }, o.selection.payment),
+      h('td', {}, h('div', {}, money(o.amount)), h('div', { class: 'small muted' }, s.payment),
         o.mode === 'test' ? h('div', { class: 'badge warn' }, 'Prueba') : null),
       h('td', {}, h('div', { class: 'row', style: 'flex-direction:column;align-items:stretch' }, actions)),
     );
@@ -264,7 +265,7 @@ async function viewOrders() {
 
 async function removeOrder(o) {
   const extra = (o.status === 'paid' || o.status === 'paid_test') ? '\n\nAtención: está pagado. Borrarlo no devuelve el dinero.' : '';
-  if (!confirm('¿Borrar el pedido de ' + o.customer.name + ' (' + o.id.slice(0, 8).toUpperCase() + ')?' + extra)) return;
+  if (!confirm('¿Borrar el pedido de ' + ((o.customer || {}).name || '') + ' (' + o.id.slice(0, 8).toUpperCase() + ')?' + extra)) return;
   try { await api('/api/admin/orders/' + o.id, { method: 'DELETE' }); go('pedidos'); }
   catch (e) { alert(e.message); }
 }
@@ -316,10 +317,10 @@ async function viewProducts() {
 function editProduct(p) {
   const draft = p ? {
     id: p.id, name: p.name, description: p.description, category: p.category, size: p.size,
-    priceCash: pesos(p.priceCash), priceCredit: pesos(p.priceCredit), maxInstallments: p.maxInstallments,
+    priceCash: pesos(p.priceCash), priceCredit: pesos(p.priceCredit), maxInstallments: p.maxInstallments, simulateColor: p.simulateColor, fabricPending: p.fabricPending,
     allowsOrientation: p.allowsOrientation, colorMode: p.colorMode, allowsLegs: p.allowsLegs, active: p.active,
     imageIds: [...p.imageIds], colorIds: p.colors.map((c) => c.id), legIds: p.legs.map((l) => l.id),
-  } : { name: '', description: '', category: '', size: '', priceCash: '', priceCredit: '', maxInstallments: 1, allowsOrientation: false,
+  } : { name: '', description: '', category: '', size: '', priceCash: '', priceCredit: '', maxInstallments: 1, simulateColor: false, fabricPending: false, allowsOrientation: false,
     colorMode: 'single', allowsLegs: false, active: true, imageIds: [], colorIds: [], legIds: [] };
 
   const msg = h('div', {});
@@ -392,7 +393,9 @@ function editProduct(p) {
         h('p', { class: 'small muted' }, 'El interés de las cuotas se configura en la pestaña Configuración, igual para todos los productos.'),
         h('h3', { style: 'margin-top:18px' }, 'Opciones'),
         h('div', { class: 'inline' }, toggle('active', 'Visible para clientes'), toggle('allowsOrientation', 'Permitir izquierda / derecha (voltea la foto)'),
-          toggle('allowsLegs', 'Ofrecer patas o maderas')),
+          toggle('allowsLegs', 'Ofrecer patas o maderas'),
+          toggle('fabricPending', 'Tela pendiente: se ve pero no se puede comprar'),
+          toggle('simulateColor', 'Simular el color sobre la foto (solo sillones base)')),
         h('label', {}, 'Colores'),
         h('select', { onchange: (e) => (draft.colorMode = e.target.value) },
           h('option', { value: 'single', selected: draft.colorMode !== 'split' }, 'Un color para todo el sillón'),
@@ -532,6 +535,66 @@ function showLogin() {
     pw, h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'p', onclick: submit }, 'Entrar')), msg));
 }
 function nav2() { $('#nav').replaceChildren(); }
+
+// --- Sitio: textos, foto de perfil, redes y WhatsApp ----------------------
+
+const SOCIAL_TYPES = [['instagram', 'Instagram'], ['facebook', 'Facebook'], ['tiktok', 'TikTok'], ['youtube', 'YouTube'], ['x', 'X'], ['linkedin', 'LinkedIn'], ['email', 'Email'], ['other', 'Otro enlace']];
+
+async function viewSite() {
+  const site = await api('/api/admin/site');
+  const draft = { ...site, socials: (site.socials || []).map((x) => ({ ...x })) };
+  const msg = h('div', {});
+  const brandPreview = h('img', { class: 'thumb', style: 'width:120px;height:120px', src: '/img/' + draft.brandImageId });
+  const text = (key, label, multi, max) => {
+    const el = multi
+      ? h('textarea', { maxlength: max, oninput: (e) => (draft[key] = e.target.value) }, draft[key])
+      : h('input', { value: draft[key] || '', maxlength: max, oninput: (e) => (draft[key] = e.target.value) });
+    return h('div', {}, h('label', {}, label), el);
+  };
+  const socialsBox = h('div', {});
+  const drawSocials = () => socialsBox.replaceChildren(...draft.socials.map((x, i) => h('div', { class: 'row', style: 'margin-bottom:8px' },
+    h('select', { onchange: (e) => (x.type = e.target.value) }, SOCIAL_TYPES.map(([v, t]) => h('option', { value: v, selected: x.type === v }, t))),
+    h('input', { value: x.url, placeholder: 'https://…  (o email)', style: 'flex:1;min-width:220px', oninput: (e) => (x.url = e.target.value) }),
+    h('button', { class: 'd', onclick: () => { draft.socials.splice(i, 1); drawSocials(); } }, 'Quitar'))));
+  drawSocials();
+  const save = async () => {
+    try {
+      const saved = await api('/api/admin/site', { method: 'PUT', body: draft });
+      Object.assign(draft, saved);
+      msg.replaceChildren(h('div', { class: 'msg' }, 'Cambios guardados. Ya se ven en el sitio para los clientes.'));
+    } catch (e) { msg.replaceChildren(h('div', { class: 'msg err' }, e.message)); }
+  };
+  $('#app').replaceChildren(
+    h('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:12px' },
+      h('h2', {}, 'Sitio y redes'), h('a', { href: '/configurador.html', target: '_blank', class: 'small' }, 'Ver el sitio →')),
+    h('div', { class: 'grid two' },
+      h('div', { class: 'card' }, h('h3', {}, 'Textos generales'),
+        text('headerLabel', 'Título del encabezado', false, 40),
+        text('introTitle', 'Título principal', false, 80),
+        text('introText', 'Texto principal', true, 300),
+        text('footerText', 'Texto del pie de página', false, 160),
+        text('deliveryAddress', 'Dirección de retiro (se muestra al elegir retiro)', true, 300)),
+      h('div', { class: 'card' }, h('h3', {}, 'Foto de perfil de la empresa'),
+        h('p', { class: 'small muted' }, 'Es la imagen del logo del encabezado. Se comprime en tu navegador.'),
+        brandPreview,
+        h('div', { style: 'margin-top:10px' }, h('input', { type: 'file', accept: 'image/*', onchange: async (e) => {
+          if (!e.target.files[0]) return;
+          try {
+            draft.brandImageId = await uploadImage(e.target.files[0], 800);
+            brandPreview.src = '/img/' + draft.brandImageId;
+            msg.replaceChildren(h('div', { class: 'msg' }, 'Foto cargada. Guardá los cambios para publicarla.'));
+          } catch (err) { msg.replaceChildren(h('div', { class: 'msg err' }, err.message)); }
+        } })))),
+    h('div', { class: 'card', style: 'margin-top:14px' }, h('h3', {}, 'Redes sociales y WhatsApp'),
+      h('div', {}, h('label', {}, 'WhatsApp (con código de país, solo números). Muestra un botón flotante en el sitio.'),
+        h('input', { value: draft.whatsapp || '', placeholder: '5492615551234', style: 'max-width:280px', oninput: (e) => (draft.whatsapp = e.target.value) })),
+      h('h3', { style: 'margin-top:18px' }, 'Redes'),
+      socialsBox,
+      h('button', { onclick: () => { draft.socials.push({ type: 'instagram', url: '' }); drawSocials(); } }, '+ Agregar red')),
+    msg,
+    h('div', { class: 'row', style: 'margin-top:16px' }, h('button', { class: 'p', onclick: save }, 'Guardar cambios')),
+  );
+}
 
 // --- Configuración de pagos -----------------------------------------------
 

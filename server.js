@@ -8,7 +8,8 @@ const mp = require('./lib/mercadopago');
 const pricing = require('./lib/pricing');
 const { loadCatalog } = require('./lib/catalog');
 const { stats, bounds } = require('./lib/stats');
-const { seedLegacy } = require('./lib/seed');
+const { seedLegacy, applyLegacyOnce } = require('./lib/seed');
+const fs = require('fs');
 const { sniffImage, MAX_BYTES } = require('./lib/images');
 const { verifySignature } = require('./lib/webhook-signature');
 
@@ -17,6 +18,85 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '32kb' }));
 app.get('/', (req, res) => res.redirect('/configurador.html'));
+
+// --- Configurador: la plantilla original, con los datos de la base inyectados ---
+const CONFIG_TEMPLATE = fs.readFileSync(path.join(__dirname, 'views', 'configurador.html'), 'utf8');
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const SOCIAL_LABEL = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', youtube: 'YouTube', x: 'X', linkedin: 'LinkedIn', email: 'Email', other: 'Enlace' };
+
+function socialsHtml(site) {
+  const links = (site.socials || []).filter((s) => s && s.url).map((s) =>
+    `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(SOCIAL_LABEL[s.type] || 'Enlace')}</a>`);
+  return links.length ? `<nav class="socials" aria-label="Redes">${links.join('')}</nav>` : '';
+}
+function whatsappHtml(site) {
+  const digits = String(site.whatsapp || '').replace(/\D/g, '');
+  if (digits.length < 8) return '';
+  return `<a id="waFloat" class="wa-float" href="https://wa.me/${digits}" target="_blank" rel="noopener">WhatsApp</a>`;
+}
+
+async function buildConfigData() {
+  const cat = await loadCatalog();
+  const s = await db.getSettings();
+  const site = s.site;
+  const shot = cat.fabrics.find((f) => /shot/i.test(f.name));
+  const best = cat.fabrics.find((f) => /best/i.test(f.name));
+  const colorRow = (c) => [c.name, c.hex || null, c.imageId ? '/img/' + c.imageId : '', c.id];
+  const products = cat.products.map((p) => {
+    const first = p.imageIds[0] ? '/img/' + p.imageIds[0] : '';
+    return {
+      id: p.id, name: p.name, size: p.size, chaise: !!p.allowsOrientation, variants: [],
+      fabricPending: !!p.fabricPending,
+      reference: p.simulateColor ? null : first || null,
+      base: first, thumb: first,
+      // Máscaras del dibujo original, asociadas al modelo (no a su posición en la lista).
+      mask: p.id === 'legacy-model-3' ? 'b' : 'a',
+      noBottom: p.id === 'legacy-model-2',
+      ref: p.id === 'legacy-model-3' ? 78 : p.id === 'legacy-model-2' ? 65 : 80,
+      colorIds: p.colors.map((c) => c.id),
+      legIds: p.legs.map((l) => l.id),
+    };
+  });
+  const legs = cat.legs.filter((l) => l.active);
+  return {
+    models: products,
+    priceCatalog: cat.products.map((p) => ({ cash: p.priceCash / 100, credit: p.priceCredit / 100 })),
+    shotColors: shot ? shot.colors.filter((c) => c.active).map(colorRow) : [],
+    bestColors: best ? best.colors.filter((c) => c.active).map(colorRow) : [],
+    legOptions: Object.fromEntries(legs.map((l) => [l.id, l.name])),
+    legImages: Object.fromEntries(legs.filter((l) => l.imageId).map((l) => ['' + l.id, '/img/' + l.imageId])),
+    legExtra: Object.fromEntries(legs.map((l) => [l.id, l.extra / 100])),
+    surcharge: { shot: shot ? shot.surcharge : 0, best: best ? best.surcharge : 0 },
+    interest: Number(s.interestPercent) || 0,
+    sena: Number(s.senaPercent),
+    site: { deliveryAddress: site.deliveryAddress },
+  };
+}
+
+async function renderConfigurator() {
+  const data = await buildConfigData();
+  const s = (await db.getSettings()).site;
+  const json = JSON.stringify(data).replace(/</g, '\\u003c');
+  const brand = '/img/' + (s.brandImageId || 'seed-brand');
+  const map = {
+    '{{brandSrc}}': esc(brand),
+    '{{headerLabel}}': esc(s.headerLabel),
+    '{{introTitle}}': esc(s.introTitle),
+    '{{introText}}': esc(s.introText),
+    '{{footerText}}': esc(s.footerText),
+    '{{deliveryAddress}}': esc(s.deliveryAddress),
+    '{{socialsHtml}}': socialsHtml(s),
+    '{{waFloat}}': whatsappHtml(s),
+  };
+  let html = CONFIG_TEMPLATE.replace('/*__SOPHIE_DATA__*/null', json);
+  for (const [k, v] of Object.entries(map)) html = html.split(k).join(v);
+  return html;
+}
+
+app.get('/configurador.html', async (req, res, next) => {
+  try { res.set('Cache-Control', 'no-store').type('html').send(await renderConfigurator()); }
+  catch (err) { next(err); }
+});
 app.get('/pedidos.html', (req, res) => res.redirect('/admin.html'));
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], index: false }));
 
@@ -112,9 +192,9 @@ function view(row, { owner = false } = {}) {
     amount: row.due_cents / 100,
     total: row.total_cents / 100,
     balance: (row.total_cents - row.due_cents) / 100,
-    product: p.product,
-    selection: p.selection,
-    customer: owner ? p.customer : { name: p.customer.name, email: p.customer.email, delivery: p.customer.delivery },
+    product: p.product || {},
+    selection: p.selection || {},
+    customer: owner ? (p.customer || {}) : { name: (p.customer || {}).name, email: (p.customer || {}).email, delivery: (p.customer || {}).delivery },
     transfer: row.status === 'awaiting_transfer' ? p.bank : null,
     checkoutUrl: row.status === 'pending' && p.checkoutUrl ? p.checkoutUrl : null,
     bankConfirmation: owner ? p.bankConfirmation || null : undefined,
@@ -184,7 +264,46 @@ app.post('/api/quote', async (req, res) => {
   }
 });
 
+function customerOrderView(row) {
+  const p = row.payload;
+  const pr = p.product || {};
+  const color = pr.colorMode === 'split' && pr.colorLeft && pr.colorRight
+    ? `${pr.colorLeft.name} (izq.) · ${pr.colorRight.name} (der.)`
+    : pr.colorLeft ? pr.colorLeft.name : '';
+  return {
+    id: row.id,
+    status: row.status,
+    mode: p.mode,
+    amount: row.due_cents / 100,
+    total: row.total_cents / 100,
+    balance: (row.total_cents - row.due_cents) / 100,
+    product: {
+      name: pr.name || '', size: pr.size || '',
+      fabric: pr.colorLeft ? pr.colorLeft.fabric : '', color,
+      legs: pr.leg || 'Sin patas', side: pr.orientation || '',
+    },
+    selection: { payment: (p.selection || {}).payment || '' },
+    customer: { name: p.customer.name, delivery: p.customer.delivery, address: p.customer.address || '' },
+    transfer: row.status === 'awaiting_transfer' ? p.bank : null,
+    checkoutUrl: row.status === 'pending' && p.checkoutUrl ? p.checkoutUrl : null,
+    canConfirmTransfer: false,
+  };
+}
+
 app.get('/api/checkout', async (req, res) => {
+  if (req.query.id !== undefined) {
+    try {
+      const id = String(req.query.id);
+      if (!/^[a-f0-9]{64}$/.test(id)) return res.status(400).json({ error: 'El enlace del pedido no es válido.' });
+      const row = await db.byId(id);
+      const token = readCookie(req, 'ord_' + id);
+      if (!row || !token || !safeEqual(token, row.access_token)) return res.status(404).json({ error: 'Pedido no encontrado.' });
+      const current = await reconcile(row);
+      return res.set('Cache-Control', 'no-store').json(customerOrderView(current));
+    } catch {
+      return res.status(502).json({ error: 'No pudimos verificar el pago ahora. No repitas el cobro; volvé a consultar este pedido.' });
+    }
+  }
   const s = await db.getSettings();
   res.set('Cache-Control', 'no-store').json({
     enabled: config.mpEnabled, mode: config.mode, transferEnabled: config.transferEnabled,
@@ -205,6 +324,7 @@ function respondWithOrder(req, res, row) {
 app.post('/api/checkout', async (req, res) => {
   try {
     const b = req.body || {};
+    if (b.action === 'confirm_transfer') throw httpError(403, 'Las transferencias las confirma Sophie desde su panel.');
     if (b.action !== 'create' || !/^[\w-]{8,64}$/.test(b.requestId || '')) throw httpError(400, 'Solicitud inválida.');
     const customer = pricing.customerData(b.customer);
     const { r, q } = await resolveFromBody(b.selection);
@@ -223,7 +343,7 @@ app.post('/api/checkout', async (req, res) => {
       return respondWithOrder(req, res, existing);
     }
 
-    const id = crypto.randomUUID();
+    const id = crypto.randomBytes(32).toString('hex');
     const payload = {
       selection: {
         productId: r.product.id, orientation: r.orientation,
@@ -343,6 +463,54 @@ app.delete('/api/admin/images/:id', async (req, res) => {
 // --- Panel: configuración global ------------------------------------------
 
 app.get('/api/admin/settings', async (req, res) => res.json(await db.getSettings()));
+
+const SOCIAL_TYPES = Object.keys(SOCIAL_LABEL);
+app.get('/api/admin/site', async (req, res) => res.json((await db.getSettings()).site));
+app.put('/api/admin/site', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const text = (v, label, max) => {
+      const t = typeof v === 'string' ? v.trim() : '';
+      if (!t || t.length > max) throw httpError(400, `Revisá ${label} (máximo ${max} caracteres).`);
+      return t;
+    };
+    const brandImageId = typeof b.brandImageId === 'string' ? b.brandImageId : '';
+    if (brandImageId) {
+      const exists = await db.pool.query('SELECT 1 FROM images WHERE id=$1', [brandImageId]);
+      if (!exists.rowCount) throw httpError(400, 'La foto de perfil no existe. Subila de nuevo.');
+    }
+    const whatsapp = String(b.whatsapp || '').replace(/\D/g, '');
+    if (whatsapp && (whatsapp.length < 8 || whatsapp.length > 15)) throw httpError(400, 'Revisá el número de WhatsApp (con código de país, solo números).');
+    const socials = (Array.isArray(b.socials) ? b.socials : []).slice(0, 12).map((s) => {
+      const type = SOCIAL_TYPES.includes(s && s.type) ? s.type : 'other';
+      const url = typeof (s && s.url) === 'string' ? s.url.trim() : '';
+      if (!url) return null;
+      if (type === 'email') {
+        const addr = url.replace(/^mailto:/i, '');
+        if (!/^\S+@\S+\.\S+$/.test(addr)) throw httpError(400, 'Revisá el email de contacto.');
+        return { type, url: 'mailto:' + addr };
+      }
+      let u;
+      try { u = new URL(url); } catch { throw httpError(400, `Revisá el enlace de ${SOCIAL_LABEL[type]}.`); }
+      if (u.protocol !== 'https:') throw httpError(400, `El enlace de ${SOCIAL_LABEL[type]} tiene que empezar con https://`);
+      return { type, url: u.href };
+    }).filter(Boolean);
+    const site = {
+      headerLabel: text(b.headerLabel, 'el título del encabezado', 40),
+      introTitle: text(b.introTitle, 'el título principal', 80),
+      introText: text(b.introText, 'el texto principal', 300),
+      footerText: text(b.footerText, 'el texto del pie', 160),
+      deliveryAddress: text(b.deliveryAddress, 'la dirección de retiro', 300),
+      brandImageId: brandImageId || 'seed-brand',
+      whatsapp,
+      socials,
+    };
+    await db.setSetting('site', site);
+    res.json(site);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.status ? err.message : 'No se pudo guardar.' });
+  }
+});
 app.put('/api/admin/settings', async (req, res) => {
   const b = req.body || {};
   const pct = (v, label, min, max) => {
@@ -397,6 +565,8 @@ async function saveProduct(req, res, id) {
       priceCash: pesosToCents(b.priceCash, 'el precio de contado'),
       priceCredit: pesosToCents(b.priceCredit, 'el precio con tarjeta'),
       maxInstallments: installments(b.maxInstallments),
+      simulateColor: bool(b.simulateColor),
+      fabricPending: bool(b.fabricPending),
       allowsOrientation: bool(b.allowsOrientation),
       colorMode: b.colorMode === 'split' ? 'split' : 'single',
       allowsLegs: bool(b.allowsLegs),
@@ -414,15 +584,15 @@ async function saveProduct(req, res, id) {
     await db.tx(async (c) => {
       await c.query(
         `INSERT INTO products (id,name,description,category,size,price_cash_cents,price_credit_cents,allows_orientation,
-           color_mode,allows_legs,active,sort,image_ids,max_installments,updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
+           color_mode,allows_legs,active,sort,image_ids,max_installments,simulate_color,fabric_pending,updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,now())
          ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, category=EXCLUDED.category,
            size=EXCLUDED.size, price_cash_cents=EXCLUDED.price_cash_cents, price_credit_cents=EXCLUDED.price_credit_cents,
            allows_orientation=EXCLUDED.allows_orientation, color_mode=EXCLUDED.color_mode, allows_legs=EXCLUDED.allows_legs,
            active=EXCLUDED.active, sort=EXCLUDED.sort, image_ids=EXCLUDED.image_ids,
-           max_installments=EXCLUDED.max_installments, updated_at=now()`,
+           max_installments=EXCLUDED.max_installments, simulate_color=EXCLUDED.simulate_color, fabric_pending=EXCLUDED.fabric_pending, updated_at=now()`,
         [productId, f.name, f.description, f.category, f.size, f.priceCash, f.priceCredit, f.allowsOrientation,
-          f.colorMode, f.allowsLegs, f.active, f.sort, f.imageIds, f.maxInstallments]);
+          f.colorMode, f.allowsLegs, f.active, f.sort, f.imageIds, f.maxInstallments, f.simulateColor, f.fabricPending]);
       const colors = (await c.query('SELECT id FROM fabric_colors WHERE id = ANY($1)', [f.colorIds])).rows.map((r) => r.id);
       await c.query('DELETE FROM product_fabric_colors WHERE product_id=$1', [productId]);
       for (const cid of colors) await c.query('INSERT INTO product_fabric_colors (product_id, fabric_color_id) VALUES ($1,$2)', [productId, cid]);
@@ -565,6 +735,7 @@ db.init()
       const r = await seedLegacy();
       console.log('Importación del sitio anterior:', JSON.stringify(r));
     }
+    console.log('Ajustes del sitio anterior:', JSON.stringify(await applyLegacyOnce()));
     if (!config.adminPassword) console.warn('ADMIN_PASSWORD no está configurada: el panel no va a permitir ingresar.');
     if (!process.env.SESSION_SECRET) console.warn('SESSION_SECRET no configurada: las sesiones del panel se cierran al reiniciar.');
     app.listen(config.port, () => console.log(`Sophie Living en puerto ${config.port} (modo ${config.mode})`));

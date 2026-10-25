@@ -54,7 +54,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": true,
+   "simulateColor": true,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-1",
@@ -106,7 +109,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": false,
+   "simulateColor": true,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-2",
@@ -159,7 +165,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": false,
+   "simulateColor": true,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-3",
@@ -210,7 +219,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": true,
+   "simulateColor": true,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-4",
@@ -218,7 +230,7 @@
    "size": "3,45 × 2,20 × 1,00 m",
    "priceCash": 182489000,
    "priceCredit": 245617700,
-   "active": false,
+   "active": true,
    "images": [
     "cutout-e309af9c-21a0-49bc-8c46-b75ee9774346.webp"
    ],
@@ -261,7 +273,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": false,
+   "simulateColor": false,
+   "fabricPending": true
   },
   {
    "id": "legacy-model-5",
@@ -312,7 +327,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": false,
+   "simulateColor": false,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-6",
@@ -363,7 +381,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": true,
+   "simulateColor": false,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-7",
@@ -414,7 +435,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": false,
+   "simulateColor": false,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-8",
@@ -465,7 +489,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": false,
+   "simulateColor": false,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-9",
@@ -516,7 +543,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": true,
+   "simulateColor": false,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-10",
@@ -567,7 +597,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": true,
+   "simulateColor": false,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-11",
@@ -618,7 +651,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": false,
+   "simulateColor": false,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-12",
@@ -669,7 +705,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": false,
+   "simulateColor": false,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-13",
@@ -720,7 +759,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": false,
+   "simulateColor": false,
+   "fabricPending": false
   },
   {
    "id": "legacy-model-14",
@@ -771,7 +813,10 @@
     "leg-wood",
     "leg-ball",
     "leg-aluminum"
-   ]
+   ],
+   "allowsOrientation": false,
+   "simulateColor": false,
+   "fabricPending": false
   }
  ],
  "fabrics": [
@@ -784,109 +829,127 @@
      "id": "col-shot-antique",
      "name": "Antique",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Antique-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#c4b9a4"
     },
     {
      "id": "col-shot-mastic",
      "name": "Mastic",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Mastic-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#a79e91"
     },
     {
      "id": "col-shot-stone",
      "name": "Stone",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Stone-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#938985"
     },
     {
      "id": "col-shot-mustang",
      "name": "Mustang",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Mustang-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#a58f74"
     },
     {
      "id": "col-shot-piedra",
      "name": "Piedra",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Piedra-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#aaa8a6"
     },
     {
      "id": "col-shot-onyx",
      "name": "Onyx",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Onyx-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#838586"
     },
     {
      "id": "col-shot-nickel",
      "name": "Nickel",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Nickel-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#575b61"
     },
     {
      "id": "col-shot-black",
      "name": "Black",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Black-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#303138"
     },
     {
      "id": "col-shot-perla",
      "name": "Perla",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Perla-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#c8c7c3"
     },
     {
      "id": "col-shot-latte",
      "name": "Latte",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Latte-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#b7a58e"
     },
     {
      "id": "col-shot-bronze",
      "name": "Bronze",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Bronze-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#9d7956"
     },
     {
      "id": "col-shot-gold",
      "name": "Gold",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Gold-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#c4a133"
     },
     {
      "id": "col-shot-green",
      "name": "Green",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Green-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#567367"
     },
     {
      "id": "col-shot-pine",
      "name": "Pine",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Pine-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#568d95"
     },
     {
      "id": "col-shot-pink",
      "name": "Pink",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Pink-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#c18f9a"
     },
     {
      "id": "col-shot-mexican",
      "name": "Mexican",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Mexican-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#b74255"
     },
     {
      "id": "col-shot-morado",
      "name": "Morado",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Morado-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#6d4c70"
     },
     {
      "id": "col-shot-cheek",
      "name": "Cheek",
      "url": "https://telasexpress.com/wp-content/uploads/2025/05/Shot-Cheek-100x100.webp",
-     "fabricId": "fab-shot"
+     "fabricId": "fab-shot",
+     "hex": "#c49584"
     }
    ]
   },
