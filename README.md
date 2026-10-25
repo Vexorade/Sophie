@@ -1,70 +1,50 @@
-# Sophie Living
+# Sophie Living v3
 
-Configurador de sillones con pedidos, pago por transferencia y Mercado Pago.
+Configurador de sillones con catálogo editable desde el panel, pedidos, transferencias y Mercado Pago.
 
-## Estructura
+## Dónde está cada cosa
 
-- `server.js`: servidor Express (API y páginas estáticas).
+- `server.js`: API y rutas.
+- `lib/db.js`: Postgres. Las tablas se crean solas al iniciar.
 - `lib/pricing.js`: precios, validaciones y reglas de pago. Todo el cálculo ocurre en el servidor.
-- `lib/mercadopago.js`: llamadas a la API de Mercado Pago.
-- `lib/webhook-signature.js`: verificación HMAC de las notificaciones.
-- `lib/db.js`: Postgres. La tabla se crea sola al iniciar.
-- `data/catalog.json`: modelos, telas, patas y precios (confirmar con Sophie).
-- `public/`: configurador original, pago del pedido (`pago.html`) y panel de pedidos (`pedidos.html`).
-- `tests/`: pruebas de precios y firma (`npm test`).
+- `lib/catalog.js`, `lib/stats.js`, `lib/images.js`: catálogo, métricas y validación de imágenes.
+- `public/configurador.html`: lo que ve el cliente.
+- `public/admin.html`: el panel (Dashboard, Pedidos, Productos, Telas y colores, Maderas y patas).
+- `public/pago.html`: estado del pedido para el cliente.
 
-## Cambios respecto de la versión anterior
+## Panel de administración
 
-- Se eliminó la confianza en encabezados de la plataforma. Cada comprador recibe una cookie httpOnly solo para su pedido.
-- El panel de pedidos usa usuario y contraseña (`ADMIN_USER` / `ADMIN_PASSWORD`), no un email fijo en el código.
-- Los datos bancarios salen del código y se cargan como variables de entorno.
-- Se eliminó el código de plataforma que no se usaba (componentes de shadcn, conectores, ejemplos D1, scripts de build).
-- El webhook de Mercado Pago se valida con la firma y no depende de una bandera de acceso público.
+Entrá a `/admin.html` con `ADMIN_USER` y `ADMIN_PASSWORD`.
+
+- **Dashboard:** pedidos por día, modelos, colores, medios de pago, patas, estado de pagos, cobrado y por cobrar.
+- **Pedidos:** aceptar, rechazar (con motivo), marcar entregado y confirmar transferencias.
+- **Productos:** nombre, descripción, medidas, precios, fotos (se comprimen en el navegador), colores permitidos, patas permitidas, si se puede elegir izquierda o derecha (la foto se voltea), y si el color es único o distinto para cada pieza.
+- **Telas y colores:** telas con recargo, colores con foto de muestra.
+- **Maderas y patas:** opciones con foto y adicional de precio.
+
+Al borrar un producto, sus fotos se borran. Los pedidos ya hechos conservan su copia y no se modifican.
+
+## Reglas de precio
+
+- Recargo de tela: se aplica el mayor de las dos piezas.
+- Contado, débito y saldo MP: seña del 50%. Crédito: total íntegro (cuotas en Mercado Pago).
+- Adicional de patas o madera: se suma al total.
 
 ## Correr en local
 
 ```
 npm install
-cp .env.example .env   # completar DATABASE_URL (Postgres local)
+cp .env.example .env
 npm test
-npm start              # http://localhost:3000
+npm start
 ```
 
-## Subir a GitHub
+## Render
 
-```
-git init
-git add .
-git commit -m "Sophie Living v2"
-git branch -M main
-git remote add origin https://github.com/TU_USUARIO/sophie-living.git
-git push -u origin main
-```
+El servicio debe usar `npm install` como build y `npm start` como start. `render.yaml` ya define las variables. Después de desplegar, cargá las telas, las maderas y los productos desde `/admin.html`.
 
-Revisar antes del push que `.env` no esté en el commit (ya está en `.gitignore`).
+## Pendientes
 
-## Desplegar en Render
-
-1. En Render: New > Blueprint, conectar el repositorio de GitHub. Render lee `render.yaml` y crea el servicio y la base.
-2. En el panel del servicio, completar los valores marcados como secretos: `PUBLIC_BASE_URL` (la URL de Render, por ejemplo `https://sophie-living.onrender.com`), `ADMIN_PASSWORD`, datos bancarios y, cuando corresponda, los tokens de Mercado Pago.
-3. Esperar el deploy y abrir `/api/health`. Debe responder `{"ok":true}`.
-4. Ingresar a `/pedidos.html` con el usuario y contraseña de administración.
-
-## Mercado Pago (pendiente)
-
-Mantener `MERCADO_PAGO_LIVE_ENABLED=false` hasta probar:
-
-1. Compras de prueba con el usuario de prueba: aprobada, rechazada y pendiente.
-2. Retorno desde el celular y reintento con doble clic (no debe duplicar el cobro).
-3. Notificaciones: en el panel de Mercado Pago, configurar la URL `PUBLIC_BASE_URL/api/webhooks/mercadopago` y el secreto de firma.
-4. Confirmar costos online y cuotas con la cuenta receptora.
-
-Las cuotas (hasta 18) dependen de lo que Mercado Pago ofrezca para cada tarjeta.
-
-## Pendientes de negocio
-
-- Confirmar precios del catálogo (los modelos 0 y 2 tienen el mismo precio; revisar).
-- Definir el modelo Luxury Panamá/Tussor cuando estén las telas.
-- Las imágenes de telas siguen apuntando a sitios externos (Tiendanube y Telas Express). Conviene descargarlas al repositorio.
-- El sistema no envía emails. Si Sophie los necesita, se agrega un proveedor de correo.
-- Los pedidos quedan asociados al navegador del comprador. Para verlos desde otro dispositivo se usa el número de pedido en `pedidos.html`.
+- Mercado Pago sigue apagado hasta probar compras de prueba.
+- Las fotos de los 15 modelos originales no están en el repositorio: subilas desde el panel.
+- Cuentas separadas para Sophie y vos: hoy hay un solo usuario de administración.

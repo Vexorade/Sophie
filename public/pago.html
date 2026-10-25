@@ -40,18 +40,29 @@ function row(label, value) {
 }
 
 function render(o) {
-  statusEl.textContent = o.statusLabel;
+  const p = o.product, s = o.selection;
   statusEl.className = 'muted';
-  detail.replaceChildren(
+  statusEl.textContent = o.statusLabel + (o.fulfillment === 'aceptado' ? ' · Pedido aceptado por Sophie' : o.fulfillment === 'rechazado' ? ' · Pedido no aceptado' : '');
+  const rows = [
     row('Número de pedido', o.id.slice(0, 8).toUpperCase()),
-    row('Modelo', o.product.name),
-    row('Tela', o.product.fabric + ' · ' + o.product.color),
-    row('Patas', o.product.legs),
-    row('Lado', o.product.side),
-    row('Total', money(o.total)),
-    row(o.selection.payment === 'Tarjeta de crédito' ? 'Importe a pagar' : 'Seña', money(o.amount)),
-    row('Saldo del sillón', money(o.balance)),
-  );
+    row('Modelo', p.name + (p.size ? ' · ' + p.size : '')),
+  ];
+  if (p.orientation) rows.push(row('Orientación', p.orientation));
+  if (p.colorMode === 'split') {
+    rows.push(row('Color izquierda', p.colorLeft.name + ' · ' + p.colorLeft.fabric));
+    rows.push(row('Color derecha', p.colorRight.name + ' · ' + p.colorRight.fabric));
+  } else {
+    rows.push(row('Color', p.colorLeft.name + ' · ' + p.colorLeft.fabric));
+  }
+  if (p.leg) rows.push(row('Patas / madera', p.leg));
+  rows.push(row('Total', money(o.total)));
+  rows.push(row(s.payment === 'Tarjeta de crédito' ? 'Importe a pagar' : 'Seña', money(o.amount)));
+  rows.push(row('Saldo del sillón', money(o.balance)));
+  detail.replaceChildren(...rows);
+  if (o.fulfillment === 'rechazado' && o.rejectReason) {
+    const box = document.createElement('div'); box.className = 'box err'; box.textContent = 'Motivo: ' + o.rejectReason;
+    detail.append(box);
+  }
   actions.replaceChildren();
   if (o.transfer) {
     const box = document.createElement('div'); box.className = 'box';
@@ -68,8 +79,8 @@ function render(o) {
     statusEl.className = 'err';
     statusEl.textContent = 'No se pudo abrir Mercado Pago. Conservamos el pedido: no repitas el pago, Sophie lo va a revisar.';
   }
-  const pending = ['pending', 'creating_checkout', 'awaiting_transfer'].includes(o.status);
-  if (!pending && timer) { clearInterval(timer); timer = null; }
+  const waiting = ['pending', 'creating_checkout', 'awaiting_transfer'].includes(o.status) || o.fulfillment === 'nuevo';
+  if (!waiting && timer) { clearInterval(timer); timer = null; }
 }
 
 async function load() {
@@ -93,6 +104,5 @@ document.querySelector('main').append(refresh);
 load();
 timer = setInterval(load, 15000);
 </script>
-</main>
 </body>
 </html>
