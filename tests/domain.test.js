@@ -6,11 +6,13 @@ const pricing = require('../lib/pricing');
 const { verifySignature } = require('../lib/webhook-signature');
 const { sniffImage } = require('../lib/images');
 
+const S = { interestPercent: 0, senaPercent: 50 };
+const SI = { interestPercent: 10, senaPercent: 30 };
 const shot = { id: 'f1', name: 'Shot', surcharge: 0 };
 const best = { id: 'f2', name: 'Best', surcharge: 5 };
 const product = {
   id: 'p1', name: 'Sofá Test', size: '2 m', active: true,
-  priceCash: 73589000, priceCredit: 98689000,
+  priceCash: 73589000, priceCredit: 98689000, maxInstallments: 12,
   allowsOrientation: true, colorMode: 'split', allowsLegs: true,
   colors: [
     { id: 'c1', name: 'Gris', fabric: 'Shot', surcharge: 0 },
@@ -21,19 +23,19 @@ const product = {
 
 test('contado: seña 50% y extra de patas', () => {
   const r = pricing.resolveSelection(product, { orientation: 'right', colorLeft: 'c1', colorRight: 'c1', legId: 'l1', payment: 'Transferencia' });
-  const q = pricing.quote(r);
+  const q = pricing.quote(r, S);
   assert.equal(q.total, 73589000 + 1000000);
   assert.equal(q.due, Math.round(q.total / 2));
 });
 
 test('recargo de tela: se aplica el mayor de las dos piezas', () => {
   const r = pricing.resolveSelection(product, { orientation: 'left', colorLeft: 'c1', colorRight: 'c2', legId: 'l1', payment: 'Mercado Pago' });
-  assert.equal(pricing.quote(r).surcharge, 5);
+  assert.equal(pricing.quote(r, S).surcharge, 5);
 });
 
 test('crédito cobra el total íntegro', () => {
   const r = pricing.resolveSelection(product, { orientation: 'left', colorLeft: 'c1', colorRight: 'c1', legId: 'l1', payment: 'Tarjeta de crédito' });
-  const q = pricing.quote(r);
+  const q = pricing.quote(r, S);
   assert.equal(q.due, q.total);
   assert.equal(q.type, 'credit_card');
 });
@@ -88,4 +90,23 @@ test('detección de imágenes por contenido', () => {
   assert.equal(sniffImage(png), 'image/png');
   assert.equal(sniffImage(webp), 'image/webp');
   assert.equal(sniffImage(Buffer.from('<html><script>alert(1)</script></html>')), null);
+});
+
+test('interés de cuotas: solo se aplica a tarjeta de crédito', () => {
+  const credit = pricing.quote(pricing.resolveSelection(product, { orientation: 'left', colorLeft: 'c1', colorRight: 'c1', legId: 'l1', payment: 'Tarjeta de crédito' }), SI);
+  assert.equal(credit.total, Math.round(98689000 * 1.1) + 1000000);
+  assert.equal(credit.maxInstallments, 12);
+  const transfer = pricing.quote(pricing.resolveSelection(product, { orientation: 'left', colorLeft: 'c1', colorRight: 'c1', legId: 'l1', payment: 'Transferencia' }), SI);
+  assert.equal(transfer.total, 73589000 + 1000000);
+  assert.equal(transfer.due, Math.round(transfer.total * 0.30));
+});
+
+test('seña global se aplica a transferencia y MP, no a crédito', () => {
+  const r = pricing.resolveSelection(product, { orientation: 'left', colorLeft: 'c1', colorRight: 'c1', legId: 'l1', payment: 'Mercado Pago' });
+  assert.equal(pricing.quote(r, { interestPercent: 0, senaPercent: 40 }).due, Math.round(pricing.quote(r, S).total * 0.4));
+});
+
+test('cuotas: sin cuotas para medios que no son crédito', () => {
+  const r = pricing.resolveSelection(product, { orientation: 'left', colorLeft: 'c1', colorRight: 'c1', legId: 'l1', payment: 'Transferencia' });
+  assert.equal(pricing.quote(r, S).maxInstallments, 1);
 });

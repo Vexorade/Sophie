@@ -37,6 +37,10 @@ services:
         sync: false
       - key: SOPHIE_BANK_NAME
         sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: SEED_LEGACY_CATALOG
+        value: "true"
 
 databases:
   - name: sophie-db

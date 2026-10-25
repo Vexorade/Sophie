@@ -98,6 +98,7 @@ async function api(path, opts = {}) {
     body: isBlob ? opts.body : opts.body ? JSON.stringify(opts.body) : undefined,
   });
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && !path.includes('/login')) { showLogin(); throw Error('Iniciá sesión para continuar.'); }
   if (!r.ok) throw Error(j.error || 'Error ' + r.status);
   return j;
 }
@@ -121,11 +122,13 @@ async function uploadImage(file, maxSide = 1400) {
   return j.id;
 }
 
-const state = { tab: 'dashboard', catalog: null, orderFilter: 'todos' };
-const TABS = [['dashboard', 'Dashboard'], ['pedidos', 'Pedidos'], ['productos', 'Productos'], ['telas', 'Telas y colores'], ['patas', 'Maderas y patas']];
+const state = { tab: 'dashboard', catalog: null, orderFilter: 'todos', period: '30', range: null };
+const TABS = [['dashboard', 'Dashboard'], ['pedidos', 'Pedidos'], ['productos', 'Productos'], ['telas', 'Telas y colores'], ['patas', 'Maderas y patas'], ['config', 'Configuración']];
+const PERIODS = [['hoy', 'Hoy'], ['7', 'Últimos 7 días'], ['30', 'Últimos 30 días'], ['mes', 'Este mes'], ['anio', 'Este año'], ['todo', 'Todo'], ['custom', 'Personalizado']];
 
 function nav() {
-  $('#nav').replaceChildren(...TABS.map(([k, t]) => h('button', { class: state.tab === k ? 'on' : '', onclick: () => go(k) }, t)));
+  $('#nav').replaceChildren(...TABS.map(([k, t]) => h('button', { class: state.tab === k ? 'on' : '', onclick: () => go(k) }, t)),
+    h('button', { onclick: async () => { await fetch('/api/admin/logout', { method: 'POST' }); showLogin(); } }, 'Salir'));
 }
 
 async function go(tab, arg) {
@@ -134,11 +137,43 @@ async function go(tab, arg) {
   app.replaceChildren(h('p', { class: 'muted' }, 'Cargando…'));
   try {
     if (!state.catalog || tab !== 'pedidos' && tab !== 'dashboard') state.catalog = await api('/api/admin/catalog');
-    const views = { dashboard: viewDashboard, pedidos: viewOrders, productos: viewProducts, telas: viewFabrics, patas: viewLegs };
+    const views = { dashboard: viewDashboard, pedidos: viewOrders, productos: viewProducts, telas: viewFabrics, patas: viewLegs, config: viewSettings };
     await views[tab](arg);
   } catch (e) {
     app.replaceChildren(h('div', { class: 'msg err' }, e.message));
   }
+}
+
+function rangeFor(key) {
+  const ar = new Date(Date.now() - 3 * 3600e3); // hora de Argentina
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const today = iso(ar);
+  switch (key) {
+    case 'hoy': return { from: today, to: today };
+    case '7': return { from: iso(new Date(ar - 6 * 864e5)), to: today };
+    case '30': return { from: iso(new Date(ar - 29 * 864e5)), to: today };
+    case 'mes': return { from: today.slice(0, 8) + '01', to: today };
+    case 'anio': return { from: today.slice(0, 4) + '-01-01', to: today };
+    case 'todo': return { from: '', to: '' };
+    default: return state.range || rangeFor('30');
+  }
+}
+function qsRange() {
+  const r = state.range || {}; const p = [];
+  if (r.from) p.push('from=' + r.from);
+  if (r.to) p.push('to=' + r.to);
+  return p.length ? '?' + p.join('&') : '';
+}
+function periodBar() {
+  if (!state.range) state.range = rangeFor('30');
+  const dates = state.period === 'custom' ? [
+    h('input', { type: 'date', value: state.range.from, onchange: (e) => { state.range = { ...state.range, from: e.target.value }; go(state.tab); } }),
+    h('input', { type: 'date', value: state.range.to, onchange: (e) => { state.range = { ...state.range, to: e.target.value }; go(state.tab); } }),
+  ] : [];
+  return h('div', { class: 'filters' },
+    PERIODS.map(([k, t]) => h('button', { class: state.period === k ? 'on' : '', onclick: () => {
+      state.period = k; state.range = k === 'custom' ? (state.range || rangeFor('30')) : rangeFor(k); go(state.tab);
+    } }, t)), dates);
 }
 
 const kpi = (label, value, sub) => h('div', { class: 'card kpi' }, h('small', {}, label), h('b', {}, value), sub ? h('small', {}, sub) : null);
@@ -151,11 +186,12 @@ function bars(rows, fmt = (v) => v) {
 }
 
 async function viewDashboard() {
-  const s = await api('/api/admin/stats');
+  const s = await api('/api/admin/stats' + qsRange());
   const t = s.totals;
   const fmtCount = (v) => String(v);
   const byDayRows = s.byDay.map((d) => ({ label: d.day, value: d.count }));
   $('#app').replaceChildren(
+    periodBar(),
     h('div', { class: 'grid k' },
       kpi('Pedidos totales', t.total),
       kpi('Hoy', t.today),
@@ -185,7 +221,7 @@ async function viewDashboard() {
 // --- Pedidos -----------------------------------------------------------
 
 async function viewOrders() {
-  const { orders } = await api('/api/admin/orders');
+  const { orders } = await api('/api/admin/orders' + qsRange());
   const f = state.orderFilter;
   const list = f === 'todos' ? orders : orders.filter((o) => o.fulfillment === f);
   const filterBtns = [['todos', 'Todos'], ['nuevo', 'Nuevos'], ['aceptado', 'Aceptados'], ['entregado', 'Entregados'], ['rechazado', 'Rechazados']]
@@ -199,6 +235,7 @@ async function viewOrders() {
     if (o.fulfillment === 'nuevo' || o.fulfillment === 'aceptado') actions.push(h('button', { class: 'd', onclick: () => reject(o) }, 'Rechazar'));
     if (o.fulfillment === 'aceptado') actions.push(h('button', { onclick: () => act(o, 'deliver') }, 'Marcar entregado'));
     if (pending) actions.push(h('button', { class: 's', onclick: () => confirmTransfer(o) }, 'Confirmar transferencia'));
+    actions.push(h('button', { class: 'd', onclick: () => removeOrder(o) }, 'Borrar pedido'));
     const fb = FULFILL[o.fulfillment] || [o.fulfillment, ''];
     return h('tr', {},
       h('td', { class: 'small' }, new Date(o.createdAt).toLocaleString('es-AR')),
@@ -217,11 +254,19 @@ async function viewOrders() {
   };
   $('#app').replaceChildren(
     h('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:12px' }, h('h2', {}, 'Pedidos'), h('button', { onclick: () => go('pedidos') }, 'Actualizar')),
+    periodBar(),
     h('div', { class: 'filters' }, filterBtns),
     list.length ? h('div', { class: 'card', style: 'padding:0;overflow-x:auto' },
       h('table', {}, h('thead', {}, h('tr', {}, ['Fecha', 'Producto', 'Cliente', 'Estado', 'Importe', 'Acciones'].map((t) => h('th', {}, t)))),
         h('tbody', {}, list.map(rowFor)))) : h('p', { class: 'muted' }, 'No hay pedidos en esta vista.'),
   );
+}
+
+async function removeOrder(o) {
+  const extra = (o.status === 'paid' || o.status === 'paid_test') ? '\n\nAtención: está pagado. Borrarlo no devuelve el dinero.' : '';
+  if (!confirm('¿Borrar el pedido de ' + o.customer.name + ' (' + o.id.slice(0, 8).toUpperCase() + ')?' + extra)) return;
+  try { await api('/api/admin/orders/' + o.id, { method: 'DELETE' }); go('pedidos'); }
+  catch (e) { alert(e.message); }
 }
 
 async function act(o, action, body) {
@@ -271,10 +316,10 @@ async function viewProducts() {
 function editProduct(p) {
   const draft = p ? {
     id: p.id, name: p.name, description: p.description, category: p.category, size: p.size,
-    priceCash: pesos(p.priceCash), priceCredit: pesos(p.priceCredit),
+    priceCash: pesos(p.priceCash), priceCredit: pesos(p.priceCredit), maxInstallments: p.maxInstallments,
     allowsOrientation: p.allowsOrientation, colorMode: p.colorMode, allowsLegs: p.allowsLegs, active: p.active,
     imageIds: [...p.imageIds], colorIds: p.colors.map((c) => c.id), legIds: p.legs.map((l) => l.id),
-  } : { name: '', description: '', category: '', size: '', priceCash: '', priceCredit: '', allowsOrientation: false,
+  } : { name: '', description: '', category: '', size: '', priceCash: '', priceCredit: '', maxInstallments: 1, allowsOrientation: false,
     colorMode: 'single', allowsLegs: false, active: true, imageIds: [], colorIds: [], legIds: [] };
 
   const msg = h('div', {});
@@ -343,6 +388,8 @@ function editProduct(p) {
         h('div', { class: 'grid two', style: 'gap:10px' },
           h('div', {}, h('label', {}, 'Precio contado (ARS)'), h('input', { ...f('priceCash'), type: 'number', min: 0, step: 1 })),
           h('div', {}, h('label', {}, 'Precio con tarjeta (ARS)'), h('input', { ...f('priceCredit'), type: 'number', min: 0, step: 1 }))),
+        h('label', {}, 'Cuotas máximas con tarjeta (1 = sin cuotas)'), h('input', { ...f('maxInstallments'), type: 'number', min: 1, max: 18, step: 1 }),
+        h('p', { class: 'small muted' }, 'El interés de las cuotas se configura en la pestaña Configuración, igual para todos los productos.'),
         h('h3', { style: 'margin-top:18px' }, 'Opciones'),
         h('div', { class: 'inline' }, toggle('active', 'Visible para clientes'), toggle('allowsOrientation', 'Permitir izquierda / derecha (voltea la foto)'),
           toggle('allowsLegs', 'Ofrecer patas o maderas')),
@@ -467,8 +514,54 @@ function legRow(l) {
       h('button', { class: 'd', onclick: async () => { if (confirm('¿Borrar esta opción?')) { await api('/api/admin/legs/' + l.id, { method: 'DELETE' }); go('patas'); } } }, 'Borrar')));
 }
 
-nav();
-go('dashboard');
+// --- Ingreso ----------------------------------------------------------------
+
+function showLogin() {
+  nav2();
+  const pw = h('input', { type: 'password', placeholder: 'Contraseña del panel', autocomplete: 'current-password' });
+  const msg = h('div', { class: 'msg err', hidden: true });
+  const submit = async () => {
+    try {
+      await api('/api/admin/login', { method: 'POST', body: { password: pw.value } });
+      nav(); go('dashboard');
+    } catch (e) { msg.textContent = e.message; msg.hidden = false; }
+  };
+  pw.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+  $('#app').replaceChildren(h('div', { class: 'card', style: 'max-width:380px;margin:60px auto' },
+    h('h2', {}, 'Ingresar'), h('p', { class: 'muted' }, 'Ingresá la contraseña del panel de Sophie.'),
+    pw, h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'p', onclick: submit }, 'Entrar')), msg));
+}
+function nav2() { $('#nav').replaceChildren(); }
+
+// --- Configuración de pagos -----------------------------------------------
+
+async function viewSettings() {
+  const s = await api('/api/admin/settings');
+  const interest = h('input', { type: 'number', min: 0, max: 200, step: '0.01', value: s.interestPercent });
+  const sena = h('input', { type: 'number', min: 0, max: 100, step: '0.01', value: s.senaPercent });
+  const msg = h('div', {});
+  $('#app').replaceChildren(
+    h('h2', {}, 'Configuración de pagos'),
+    h('div', { class: 'card', style: 'max-width:640px' },
+      h('h3', {}, 'Tarjeta de crédito'),
+      h('label', {}, 'Interés de cuotas (%). 0 = sin interés'), interest,
+      h('p', { class: 'small muted' }, 'Se suma al precio con tarjeta de cada producto. Las cuotas máximas se eligen en cada producto.'),
+      h('h3', { style: 'margin-top:22px' }, 'Seña por transferencia y otros medios'),
+      h('label', {}, 'Porcentaje que paga el cliente al confirmar (%)'), sena,
+      h('p', { class: 'small muted' }, 'Aplica a transferencia, Mercado Pago y débito. Lo que queda se coordina con Sophie.'),
+      msg,
+      h('div', { class: 'row', style: 'margin-top:16px' }, h('button', { class: 'p', onclick: async () => {
+        try {
+          await api('/api/admin/settings', { method: 'PUT', body: { interestPercent: interest.value, senaPercent: sena.value } });
+          msg.replaceChildren(h('div', { class: 'msg' }, 'Configuración guardada. Se aplica a los próximos pedidos.'));
+        } catch (e) { msg.replaceChildren(h('div', { class: 'msg err' }, e.message)); }
+      } }, 'Guardar configuración'))));
+}
+
+// Arranque: si ya hay sesión se entra directo; si no, se pide la contraseña.
+fetch('/api/admin/session', { cache: 'no-store' }).then((r) => {
+  if (r.ok) { nav(); go('dashboard'); } else showLogin();
+}).catch(showLogin);
 </script>
 </body>
 </html>

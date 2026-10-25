@@ -7,12 +7,14 @@ const db = require('./lib/db');
 const mp = require('./lib/mercadopago');
 const pricing = require('./lib/pricing');
 const { loadCatalog } = require('./lib/catalog');
-const { stats } = require('./lib/stats');
+const { stats, bounds } = require('./lib/stats');
+const { seedLegacy } = require('./lib/seed');
 const { sniffImage, MAX_BYTES } = require('./lib/images');
 const { verifySignature } = require('./lib/webhook-signature');
 
 const app = express();
 app.disable('x-powered-by');
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '32kb' }));
 app.get('/', (req, res) => res.redirect('/configurador.html'));
 app.get('/pedidos.html', (req, res) => res.redirect('/admin.html'));
@@ -20,28 +22,76 @@ app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'], i
 
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 const bool = (v) => v === true || v === 'true';
+const SESSION_HOURS = 12;
 
 function safeEqual(a, b) {
   const ha = crypto.createHash('sha256').update(String(a)).digest();
   const hb = crypto.createHash('sha256').update(String(b)).digest();
   return crypto.timingSafeEqual(ha, hb);
 }
-
 function readCookie(req, name) {
   const found = (req.headers.cookie || '').split(';').map((c) => c.trim()).find((c) => c.startsWith(name + '='));
   return found ? decodeURIComponent(found.slice(name.length + 1)) : '';
 }
+const sign = (v) => crypto.createHmac('sha256', config.sessionSecret).update(v).digest('hex');
+function makeSession() {
+  const exp = Date.now() + SESSION_HOURS * 3600e3;
+  return `${exp}.${sign(String(exp))}`;
+}
+function validSession(tok) {
+  const [exp, sig] = String(tok || '').split('.');
+  if (!exp || !sig || Date.now() > Number(exp)) return false;
+  return safeEqual(sig, sign(exp));
+}
+const cookieOpts = (req) => ({
+  httpOnly: true, sameSite: 'strict', path: '/',
+  secure: (config.baseUrl || '').startsWith('https') || req.secure,
+});
 
-// Panel de administración: usuario y contraseña (Basic Auth) desde variables de entorno.
-function requireAdmin(req, res, next) {
-  const [scheme, b64] = (req.headers.authorization || '').split(' ');
-  if (scheme === 'Basic' && b64 && config.adminPassword) {
-    const [user, ...rest] = Buffer.from(b64, 'base64').toString().split(':');
-    if (safeEqual(user, config.adminUser) && safeEqual(rest.join(':'), config.adminPassword)) return next();
+// --- Inicio de sesión del panel (solo contraseña, dentro de la página) -----
+
+const attempts = new Map();
+function blocked(ip) {
+  const a = attempts.get(ip);
+  return !!a && a.n >= 8 && Date.now() < a.reset;
+}
+function failed(ip) {
+  const a = attempts.get(ip) && Date.now() < attempts.get(ip).reset
+    ? attempts.get(ip) : { n: 0, reset: Date.now() + 15 * 60e3 };
+  a.n += 1;
+  attempts.set(ip, a);
+}
+
+app.post('/api/admin/login', (req, res) => {
+  if (!config.adminPassword) return res.status(503).json({ error: 'Falta configurar ADMIN_PASSWORD en el servidor.' });
+  if (blocked(req.ip)) return res.status(429).json({ error: 'Demasiados intentos. Esperá 15 minutos.' });
+  const pass = typeof (req.body || {}).password === 'string' ? req.body.password : '';
+  if (!pass || !safeEqual(pass, config.adminPassword)) {
+    failed(req.ip);
+    return res.status(401).json({ error: 'Contraseña incorrecta.' });
   }
-  res.set('WWW-Authenticate', 'Basic realm="Sophie admin"').status(401).json({ error: 'Acceso restringido.' });
+  attempts.delete(req.ip);
+  res.cookie('sophie_admin', makeSession(), { ...cookieOpts(req), maxAge: SESSION_HOURS * 3600e3 });
+  res.json({ ok: true });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  res.clearCookie('sophie_admin', cookieOpts(req));
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/session', (req, res) => {
+  if (validSession(readCookie(req, 'sophie_admin'))) return res.json({ ok: true });
+  res.status(401).json({ error: 'Iniciá sesión.' });
+});
+
+function requireAdmin(req, res, next) {
+  if (validSession(readCookie(req, 'sophie_admin'))) return next();
+  res.status(401).json({ error: 'Iniciá sesión para continuar.' });
 }
 app.use('/api/admin', requireAdmin);
+
+// --- Estados y vista de pedidos ---------------------------------------------
 
 const STATUS_LABEL = {
   awaiting_transfer: 'Esperando transferencia', creating_checkout: 'Preparando pago', pending: 'Pendiente de pago',
@@ -51,7 +101,7 @@ const STATUS_LABEL = {
 
 function view(row, { owner = false } = {}) {
   const p = row.payload;
-  const out = {
+  return {
     id: row.id,
     status: row.status,
     statusLabel: STATUS_LABEL[row.status] || row.status,
@@ -64,18 +114,15 @@ function view(row, { owner = false } = {}) {
     balance: (row.total_cents - row.due_cents) / 100,
     product: p.product,
     selection: p.selection,
-    customer: owner
-      ? p.customer
-      : { name: p.customer.name, email: p.customer.email, delivery: p.customer.delivery },
+    customer: owner ? p.customer : { name: p.customer.name, email: p.customer.email, delivery: p.customer.delivery },
     transfer: row.status === 'awaiting_transfer' ? p.bank : null,
     checkoutUrl: row.status === 'pending' && p.checkoutUrl ? p.checkoutUrl : null,
     bankConfirmation: owner ? p.bankConfirmation || null : undefined,
     createdAt: row.created_at,
   };
-  return out;
 }
 
-// --- Mercado Pago ---------------------------------------------------------
+// --- Mercado Pago ----------------------------------------------------------
 
 async function applyPayment(row, p) {
   if (row.payload.channel !== 'mp' || row.payload.mode !== config.mode) return;
@@ -102,18 +149,17 @@ async function reconcile(row) {
   return db.byId(row.id);
 }
 
-// --- Catálogo y cotización (público) --------------------------------------
+// --- Catálogo, cotización y estado (público) -------------------------------
 
 app.get('/api/catalog', async (req, res) => {
   const cat = await loadCatalog();
-  res.set('Cache-Control', 'public, max-age=60').json({
+  res.set('Cache-Control', 'no-store').json({
     products: cat.products.map((p) => ({
       id: p.id, name: p.name, description: p.description, category: p.category, size: p.size,
-      priceCash: p.priceCash, priceCredit: p.priceCredit,
+      priceCash: p.priceCash, priceCredit: p.priceCredit, maxInstallments: p.maxInstallments,
       allowsOrientation: p.allowsOrientation, colorMode: p.colorMode, allowsLegs: p.allowsLegs,
       imageIds: p.imageIds, colors: p.colors, legs: p.legs,
     })),
-    legs: cat.legs.filter((l) => l.active),
   });
 });
 
@@ -121,7 +167,8 @@ async function resolveFromBody(selection) {
   const cat = await loadCatalog();
   const product = cat.products.find((p) => p.id === (selection && selection.productId));
   const r = pricing.resolveSelection(product, selection || {});
-  return { r, q: pricing.quote(r) };
+  const settings = await db.getSettings();
+  return { r, q: pricing.quote(r, settings), settings };
 }
 
 app.post('/api/quote', async (req, res) => {
@@ -129,15 +176,20 @@ app.post('/api/quote', async (req, res) => {
     const { r, q } = await resolveFromBody(req.body && req.body.selection);
     res.set('Cache-Control', 'no-store').json({
       product: r.product.name, total: q.total / 100, due: q.due / 100, balance: q.balance / 100,
-      credit: q.credit, surcharge: q.surcharge,
+      credit: q.credit, surcharge: q.surcharge, interest: q.interest,
+      senaPercent: q.senaPercent, maxInstallments: q.maxInstallments,
     });
   } catch (err) {
     res.status(err.status || 400).json({ error: err.message });
   }
 });
 
-app.get('/api/checkout', (req, res) => {
-  res.set('Cache-Control', 'no-store').json({ enabled: config.mpEnabled, mode: config.mode, transferEnabled: config.transferEnabled });
+app.get('/api/checkout', async (req, res) => {
+  const s = await db.getSettings();
+  res.set('Cache-Control', 'no-store').json({
+    enabled: config.mpEnabled, mode: config.mode, transferEnabled: config.transferEnabled,
+    senaPercent: Number(s.senaPercent), interestPercent: Number(s.interestPercent),
+  });
 });
 
 function respondWithOrder(req, res, row) {
@@ -148,7 +200,7 @@ function respondWithOrder(req, res, row) {
   res.set('Cache-Control', 'no-store').json(view(row));
 }
 
-// --- Pedidos (cliente) ----------------------------------------------------
+// --- Pedidos del cliente ---------------------------------------------------
 
 app.post('/api/checkout', async (req, res) => {
   try {
@@ -163,7 +215,6 @@ app.post('/api/checkout', async (req, res) => {
         : 'El pago online todavía no está habilitado. No se realizó ningún cobro.');
     }
 
-    // Reintento con el mismo requestId: se devuelve el pedido existente, sin duplicar cobros.
     const existing = await db.byRequest(b.requestId);
     if (existing) {
       if (JSON.stringify(existing.payload.customer) !== JSON.stringify(customer)) {
@@ -184,6 +235,8 @@ app.post('/api/checkout', async (req, res) => {
       channel: transfer ? 'transfer' : 'mp',
       mode: config.mode,
       expectedType: q.type,
+      senaPercent: q.senaPercent,
+      interest: q.interest,
       bank: transfer ? { account: config.bank.account, holder: config.bank.holder, bank: config.bank.bank } : null,
     };
     const inserted = await db.insertOrder({
@@ -206,14 +259,14 @@ app.post('/api/checkout', async (req, res) => {
         const pref = await mp.createPreference({
           items: [{
             id: String(r.product.id),
-            title: 'Sophie · ' + (q.credit ? '' : 'Seña 50% · ') + r.product.name,
+            title: 'Sophie · ' + (q.credit ? '' : `Seña ${q.senaPercent}% · `) + r.product.name,
             quantity: 1, currency_id: 'ARS', unit_price: q.due / 100,
           }],
           payer: { name: customer.name, email: customer.email, identification: { type: 'DNI', number: customer.dni } },
           external_reference: id,
           back_urls: { success: back, pending: back, failure: back },
           auto_return: 'approved',
-          payment_methods: pricing.paymentMethodsFor(q.type, types),
+          payment_methods: pricing.paymentMethodsFor(q.type, types, q.maxInstallments),
           expires: true,
           expiration_date_to: new Date(Date.now() + 24 * 3600000).toISOString(),
           ...(config.webhookSecret ? { notification_url: origin + '/api/webhooks/mercadopago' } : {}),
@@ -253,9 +306,7 @@ app.get('/api/orders/:id', async (req, res) => {
 
 app.post('/api/webhooks/mercadopago', async (req, res) => {
   const dataId = String(req.query['data.id'] || '');
-  if (!verifySignature(config.webhookSecret, dataId, req.get('x-request-id'), req.get('x-signature'))) {
-    return res.status(401).end();
-  }
+  if (!verifySignature(config.webhookSecret, dataId, req.get('x-request-id'), req.get('x-signature'))) return res.status(401).end();
   try {
     if (!config.mpEnabled) return res.status(503).end();
     const p = await mp.getPayment(dataId);
@@ -268,14 +319,14 @@ app.post('/api/webhooks/mercadopago', async (req, res) => {
   }
 });
 
-// --- Imágenes -------------------------------------------------------------
-
 app.get('/img/:id', async (req, res) => {
   const r = await db.pool.query('SELECT mime, data FROM images WHERE id=$1', [req.params.id]);
   const row = r.rows[0];
   if (!row) return res.status(404).end();
   res.set('Content-Type', row.mime).set('Cache-Control', 'public, max-age=31536000, immutable').send(row.data);
 });
+
+// --- Panel: imágenes -------------------------------------------------------
 
 app.post('/api/admin/images', express.raw({ type: 'image/*', limit: MAX_BYTES }), async (req, res) => {
   const mime = sniffImage(req.body);
@@ -284,13 +335,33 @@ app.post('/api/admin/images', express.raw({ type: 'image/*', limit: MAX_BYTES })
   await db.pool.query('INSERT INTO images (id, mime, data, bytes) VALUES ($1,$2,$3,$4)', [id, mime, req.body, req.body.length]);
   res.json({ id, url: '/img/' + id });
 });
-
 app.delete('/api/admin/images/:id', async (req, res) => {
   await db.pool.query('DELETE FROM images WHERE id=$1', [req.params.id]);
   res.json({ ok: true });
 });
 
-// --- Panel: catálogo ------------------------------------------------------
+// --- Panel: configuración global ------------------------------------------
+
+app.get('/api/admin/settings', async (req, res) => res.json(await db.getSettings()));
+app.put('/api/admin/settings', async (req, res) => {
+  const b = req.body || {};
+  const pct = (v, label, min, max) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < min || n > max) throw httpError(400, `Revisá ${label} (entre ${min} y ${max}).`);
+    return Math.round(n * 100) / 100;
+  };
+  try {
+    const interestPercent = pct(b.interestPercent, 'el interés de cuotas', 0, 200);
+    const senaPercent = pct(b.senaPercent, 'la seña', 0, 100);
+    await db.setSetting('interestPercent', interestPercent);
+    await db.setSetting('senaPercent', senaPercent);
+    res.json({ interestPercent, senaPercent });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// --- Panel: catálogo -------------------------------------------------------
 
 const str = (v, min, max, label) => {
   const t = typeof v === 'string' ? v.trim() : '';
@@ -304,12 +375,16 @@ const pesosToCents = (v, label) => {
   return Math.round(n * 100);
 };
 const idList = (v, max = 50) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, max) : []);
+const installments = (v) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) ? Math.min(18, Math.max(1, n)) : 1;
+};
 
 app.get('/api/admin/catalog', async (req, res) => res.json(await loadCatalog({ includeInactive: true })));
-app.get('/api/admin/stats', async (req, res) => res.set('Cache-Control', 'no-store').json(await stats()));
+app.get('/api/admin/stats', async (req, res) => res.set('Cache-Control', 'no-store').json(await stats(req.query.from, req.query.to)));
 
-app.post('/api/admin/products', async (req, res) => saveProduct(req, res, null));
-app.put('/api/admin/products/:id', async (req, res) => saveProduct(req, res, req.params.id));
+app.post('/api/admin/products', (req, res) => saveProduct(req, res, null));
+app.put('/api/admin/products/:id', (req, res) => saveProduct(req, res, req.params.id));
 
 async function saveProduct(req, res, id) {
   try {
@@ -321,6 +396,7 @@ async function saveProduct(req, res, id) {
       size: optStr(b.size, 120),
       priceCash: pesosToCents(b.priceCash, 'el precio de contado'),
       priceCredit: pesosToCents(b.priceCredit, 'el precio con tarjeta'),
+      maxInstallments: installments(b.maxInstallments),
       allowsOrientation: bool(b.allowsOrientation),
       colorMode: b.colorMode === 'split' ? 'split' : 'single',
       allowsLegs: bool(b.allowsLegs),
@@ -338,25 +414,21 @@ async function saveProduct(req, res, id) {
     await db.tx(async (c) => {
       await c.query(
         `INSERT INTO products (id,name,description,category,size,price_cash_cents,price_credit_cents,allows_orientation,
-           color_mode,allows_legs,active,sort,image_ids,updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now())
+           color_mode,allows_legs,active,sort,image_ids,max_installments,updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
          ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description, category=EXCLUDED.category,
            size=EXCLUDED.size, price_cash_cents=EXCLUDED.price_cash_cents, price_credit_cents=EXCLUDED.price_credit_cents,
            allows_orientation=EXCLUDED.allows_orientation, color_mode=EXCLUDED.color_mode, allows_legs=EXCLUDED.allows_legs,
-           active=EXCLUDED.active, sort=EXCLUDED.sort, image_ids=EXCLUDED.image_ids, updated_at=now()`,
+           active=EXCLUDED.active, sort=EXCLUDED.sort, image_ids=EXCLUDED.image_ids,
+           max_installments=EXCLUDED.max_installments, updated_at=now()`,
         [productId, f.name, f.description, f.category, f.size, f.priceCash, f.priceCredit, f.allowsOrientation,
-          f.colorMode, f.allowsLegs, f.active, f.sort, f.imageIds]
-      );
+          f.colorMode, f.allowsLegs, f.active, f.sort, f.imageIds, f.maxInstallments]);
       const colors = (await c.query('SELECT id FROM fabric_colors WHERE id = ANY($1)', [f.colorIds])).rows.map((r) => r.id);
       await c.query('DELETE FROM product_fabric_colors WHERE product_id=$1', [productId]);
-      for (const cid of colors) {
-        await c.query('INSERT INTO product_fabric_colors (product_id, fabric_color_id) VALUES ($1,$2)', [productId, cid]);
-      }
+      for (const cid of colors) await c.query('INSERT INTO product_fabric_colors (product_id, fabric_color_id) VALUES ($1,$2)', [productId, cid]);
       const legs = f.allowsLegs ? (await c.query('SELECT id FROM legs WHERE id = ANY($1)', [f.legIds])).rows.map((r) => r.id) : [];
       await c.query('DELETE FROM product_legs WHERE product_id=$1', [productId]);
-      for (const lid of legs) {
-        await c.query('INSERT INTO product_legs (product_id, leg_id) VALUES ($1,$2)', [productId, lid]);
-      }
+      for (const lid of legs) await c.query('INSERT INTO product_legs (product_id, leg_id) VALUES ($1,$2)', [productId, lid]);
     });
     res.json({ id: productId });
   } catch (err) {
@@ -365,16 +437,13 @@ async function saveProduct(req, res, id) {
 }
 
 app.delete('/api/admin/products/:id', async (req, res) => {
-  // Los pedidos guardan su propia copia del producto, así que borrarlo no afecta el historial.
   await db.tx(async (c) => {
     const r = await c.query('SELECT image_ids FROM products WHERE id=$1', [req.params.id]);
-    if (r.rows[0]) await c.query('DELETE FROM images WHERE id = ANY($1)', [r.rows[0].image_ids]);
+    if (r.rows[0] && r.rows[0].image_ids.length) await c.query('DELETE FROM images WHERE id = ANY($1)', [r.rows[0].image_ids]);
     await c.query('DELETE FROM products WHERE id=$1', [req.params.id]);
   });
   res.json({ ok: true });
 });
-
-// --- Panel: telas y colores -----------------------------------------------
 
 app.post('/api/admin/fabrics', async (req, res) => {
   const b = req.body || {};
@@ -398,7 +467,6 @@ app.delete('/api/admin/fabrics/:id', async (req, res) => {
   });
   res.json({ ok: true });
 });
-
 app.post('/api/admin/fabric-colors', async (req, res) => {
   const b = req.body || {};
   const id = crypto.randomUUID();
@@ -419,9 +487,6 @@ app.delete('/api/admin/fabric-colors/:id', async (req, res) => {
   });
   res.json({ ok: true });
 });
-
-// --- Panel: maderas y patas -----------------------------------------------
-
 app.post('/api/admin/legs', async (req, res) => {
   const b = req.body || {};
   const id = crypto.randomUUID();
@@ -443,31 +508,34 @@ app.delete('/api/admin/legs/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-// --- Panel: pedidos -------------------------------------------------------
+// --- Panel: pedidos --------------------------------------------------------
 
 app.get('/api/admin/orders', async (req, res) => {
-  const rows = await db.list();
+  const [from, to] = bounds(req.query.from, req.query.to);
+  const rows = await db.list(from, to);
   res.set('Cache-Control', 'no-store').json({ orders: rows.map((r) => view(r, { owner: true })) });
 });
 
 async function fulfillmentAction(req, res, from, to, reason) {
   const row = await db.byId(req.params.id);
   if (!row) return res.status(404).json({ error: 'Pedido no encontrado.' });
-  if (!from.includes(row.fulfillment)) {
-    return res.status(409).json({ error: `Este pedido está en estado "${row.fulfillment}".` });
-  }
+  if (!from.includes(row.fulfillment)) return res.status(409).json({ error: `Este pedido está en estado "${row.fulfillment}".` });
   await db.setFulfillment(row.id, to, reason);
   res.json({ id: row.id, fulfillment: to });
 }
+const optReason = (req) => optStr((req.body || {}).reason, 300);
 
 app.post('/api/admin/orders/:id/accept', (req, res) => fulfillmentAction(req, res, ['nuevo', 'rechazado'], 'aceptado'));
 app.post('/api/admin/orders/:id/deliver', (req, res) => fulfillmentAction(req, res, ['aceptado'], 'entregado'));
-app.post('/api/admin/orders/:id/reject', (req, res) => {
-  const reason = optStr((req.body || {}).reason, 300);
-  return fulfillmentAction(req, res, ['nuevo', 'aceptado'], 'rechazado', reason || 'Sin motivo indicado');
+app.post('/api/admin/orders/:id/reject', (req, res) =>
+  fulfillmentAction(req, res, ['nuevo', 'aceptado'], 'rechazado', optReason(req) || 'Sin motivo indicado'));
+
+app.delete('/api/admin/orders/:id', async (req, res) => {
+  const ok = await db.deleteOrder(req.params.id);
+  if (!ok) return res.status(404).json({ error: 'Pedido no encontrado.' });
+  res.json({ ok: true });
 });
 
-// Confirmación manual de transferencias: el importe debe coincidir con la seña.
 app.post('/api/admin/orders/:id/confirm-transfer', async (req, res) => {
   const b = req.body || {};
   const row = await db.byId(req.params.id);
@@ -492,7 +560,15 @@ app.use((err, req, res, next) => {
 });
 
 db.init()
-  .then(() => app.listen(config.port, () => console.log(`Sophie Living en puerto ${config.port} (modo ${config.mode})`)))
+  .then(async () => {
+    if (config.seedLegacy) {
+      const r = await seedLegacy();
+      console.log('Importación del sitio anterior:', JSON.stringify(r));
+    }
+    if (!config.adminPassword) console.warn('ADMIN_PASSWORD no está configurada: el panel no va a permitir ingresar.');
+    if (!process.env.SESSION_SECRET) console.warn('SESSION_SECRET no configurada: las sesiones del panel se cierran al reiniciar.');
+    app.listen(config.port, () => console.log(`Sophie Living en puerto ${config.port} (modo ${config.mode})`));
+  })
   .catch((e) => {
     console.error('No se pudo iniciar:', e.code || '', e.message || e);
     process.exit(1);

@@ -225,9 +225,10 @@ async function updateQuote() {
     box.replaceChildren(
       h('div', {}, h('span', {}, q.credit ? 'Precio de lista' : 'Precio contado'), h('span', {}, money(q.total))),
       q.surcharge ? h('div', {}, h('span', {}, 'Incluye recargo de tela'), h('span', {}, '+' + q.surcharge + '%')) : null,
-      h('div', {}, h('span', {}, q.credit ? 'Importe a pagar' : 'Seña 50%'), h('span', { class: 'big' }, money(q.due))),
+      q.interest ? h('div', {}, h('span', {}, 'Incluye interés de cuotas'), h('span', {}, '+' + q.interest + '%')) : null,
+      h('div', {}, h('span', {}, q.credit ? 'Importe a pagar' : 'Seña ' + q.senaPercent + '%'), h('span', { class: 'big' }, money(q.due))),
       q.credit ? null : h('div', {}, h('span', {}, 'Saldo del sillón'), h('span', {}, money(q.balance))),
-      h('p', { class: 'msg' }, q.credit ? 'Las cuotas y financiación se muestran en Mercado Pago antes de confirmar.' : 'El saldo se coordina con Sophie al retirar o entregar.'));
+      h('p', { class: 'msg' }, q.credit ? 'Podés pagar en hasta ' + q.maxInstallments + ' cuotas. Las elegís en Mercado Pago antes de confirmar.' : 'El saldo se coordina con Sophie al retirar o entregar.'));
     box.dataset.ok = '1';
   } catch (e) {
     box.replaceChildren(h('div', { class: 'msg err' }, e.message));
