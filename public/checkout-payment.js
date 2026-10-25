@@ -21,7 +21,7 @@
    if(!response.ok&&!order.id)throw Error(order.error||'No se pudo preparar el pago.');
    if(!order.id)throw Error('No se pudo identificar el pedido.');
    // Top-level navigation to our receipt. The payment link there requires a real click.
-   window.location.assign('/pago.html?id='+encodeURIComponent(order.id));
+   window.location.assign('/pago.html?id='+encodeURIComponent(order.id)+'&t='+encodeURIComponent(order.accessToken||''));
   }catch(e){status.textContent=e.message||'No pudimos confirmar el resultado. Volvé a intentar con los mismos datos.';busy=false;refresh();}
  });refresh();
 })();

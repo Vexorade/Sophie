@@ -1,15 +1,15 @@
 (()=>{
- const id=new URL(location.href).searchParams.get('id'),status=document.querySelector('#status'),details=document.querySelector('#details'),pay=document.querySelector('#pay');
+ const tok=new URL(location.href).searchParams.get('t'),id=new URL(location.href).searchParams.get('id'),status=document.querySelector('#status'),details=document.querySelector('#details'),pay=document.querySelector('#pay');
  const money=n=>new Intl.NumberFormat('es-AR',{style:'currency',currency:'ARS'}).format(n);
  const labels={pending:'Pedido guardado. El pago todavía no está acreditado.',creating_checkout:'Estamos preparando el pago. Actualizá el estado en unos segundos.',checkout_error:'No se pudo preparar el cobro. Tu pedido quedó guardado para revisión.',awaiting_transfer:'Pedido pendiente de transferencia.',paid:'Pago acreditado. Tu pedido quedó confirmado.',paid_test:'Pago de prueba aprobado. No se realizó una compra real.',rejected:'El pago fue rechazado. Podés revisar el medio de pago en Mercado Pago.',cancelled:'El pago fue cancelado.',refunded:'El pago fue reembolsado total o parcialmente. El pedido requiere revisión.',charged_back:'El pago tiene un contracargo. El pedido requiere revisión.',review:'Estamos revisando el pago. No vuelvas a pagar.'};
  function row(target,key,value){const div=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');dt.textContent=key;dd.textContent=value;div.append(dt,dd);target.append(div);}
  let busy=false;
  async function update(){if(busy)return;busy=true;document.querySelector('#refresh').disabled=true;try{
   if(!/^[a-f0-9]{64}$/.test(id||''))throw Error('El enlace del pedido no es válido.');
-  const r=await fetch('/api/checkout?id='+encodeURIComponent(id),{cache:'no-store'});const o=await r.json();if(!r.ok)throw Error(o.error||'No se pudo consultar el pedido.');
+  const r=await fetch('/api/checkout?id='+encodeURIComponent(id)+(tok?'&t='+encodeURIComponent(tok):''),{cache:'no-store'});const o=await r.json();if(!r.ok)throw Error(o.error||'No se pudo consultar el pedido.');
   document.querySelector('#confirmTransfer').hidden=!o.canConfirmTransfer;status.textContent=labels[o.status]||'El pedido está pendiente de verificación.';details.replaceChildren();
   row(details,'Pedido',o.id);if(o.product){row(details,'Modelo',o.product.name);row(details,'Medidas',o.product.size);row(details,'Tela y color',o.product.fabric+' · '+o.product.color);row(details,'Patas',o.product.legs);}row(details,'Importe de esta operación',money(o.amount));row(details,'Saldo del sillón',money(o.balance));row(details,'Pago',o.selection.payment);row(details,'Comprador',o.customer.name);row(details,'Entrega',o.customer.delivery==='shipping'?o.customer.address+' · envío a cotizar por separado':'Retiro en showroom');
-  const p=new URL(location.href).searchParams;if(p.has('collection_id')||p.has('payment_id'))history.replaceState(null,'','/pago.html?id='+id);
+  const p=new URL(location.href).searchParams;if(p.has('collection_id')||p.has('payment_id'))history.replaceState(null,'','/pago.html?id='+id+(tok?'&t='+encodeURIComponent(tok):''));
   pay.hidden=true;
   if(o.checkoutUrl&&['pending','rejected','cancelled'].includes(o.status)){const url=new URL(o.checkoutUrl);if(url.protocol==='https:'&&['www.mercadopago.com.ar','mercadopago.com.ar','sandbox.mercadopago.com.ar','sandbox.mercadopago.com'].includes(url.hostname)){pay.href=url.href;pay.hidden=false;pay.textContent=(o.mode==='test'?'Continuar a Mercado Pago (prueba)':'Continuar a Mercado Pago')+' →';}}
   document.querySelector('#bank').hidden=!o.transfer;
