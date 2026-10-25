@@ -724,7 +724,7 @@ app.post('/api/admin/orders/:id/confirm-transfer', async (req, res) => {
   res.json({ id: row.id, status: 'paid' });
 });
 
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.get('/api/health', (req, res) => res.json({ ok: true, version: 'v5-token' }));
 
 app.use((err, req, res, next) => {
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Solicitud inválida.' });
