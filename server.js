@@ -313,13 +313,13 @@ app.get('/api/checkout', async (req, res) => {
   });
 });
 
-function respondWithOrder(req, res, row) {
+function respondWithOrder(req, res, row, status = 200, extra = {}) {
   res.cookie('ord_' + row.id, row.access_token, {
     httpOnly: true, secure: (config.baseUrl || '').startsWith('https'), sameSite: 'lax',
     path: '/', maxAge: 30 * 24 * 3600 * 1000,
   });
   // El token viaja en el enlace de pago: no depende de que el navegador conserve la cookie.
-  res.set('Cache-Control', 'no-store').json({ ...view(row), accessToken: row.access_token });
+  res.status(status).set('Cache-Control', 'no-store').json({ ...view(row), accessToken: row.access_token, ...extra });
 }
 
 // --- Pedidos del cliente ---------------------------------------------------
@@ -404,9 +404,12 @@ app.post('/api/checkout', async (req, res) => {
         payload.preferenceId = pref.id;
         await db.setPayload(id, JSON.stringify(payload), 'pending');
       } catch (err) {
+        console.error('Mercado Pago (pedido ' + id + '):', err.message);
         await db.setStatus(id, 'checkout_error');
         if (err.status && err.status < 500) throw err;
-        return res.status(502).json({ error: 'No se pudo abrir Mercado Pago. Conservamos el pedido; no repitas el pago.', id });
+        return respondWithOrder(req, res, await db.byId(id), 502, {
+          error: 'No se pudo abrir Mercado Pago. Conservamos el pedido; no repitas el pago.',
+        });
       }
     }
     return respondWithOrder(req, res, await db.byId(id));
