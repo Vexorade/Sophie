@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sophie · Tu pedido</title>
+<style>
+body{margin:0;background:#f7f6f2;color:#303c35;font:15px system-ui,sans-serif}
+main{max-width:640px;margin:40px auto;padding:28px;background:#fff;border:1px solid #dedfd7;border-radius:16px}
+h1{font:30px Georgia,serif;margin:0 0 6px}
+.muted{color:#777e75;line-height:1.5}
+.row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid #eee}
+.row span:first-child{color:#777e75}
+.btn{display:inline-block;background:#657659;color:#fff;padding:12px 18px;border-radius:10px;text-decoration:none;border:0;cursor:pointer;font:inherit;margin-top:18px}
+.btn.secondary{background:#eef0ea;color:#384239}
+.box{background:#f4f6f0;border-radius:10px;padding:14px;margin:16px 0}
+.err{color:#a33}
+</style>
+</head>
+<body>
+<main>
+  <h1>Tu pedido</h1>
+  <p id="status" class="muted">Cargando…</p>
+  <div id="detail"></div>
+  <div id="actions"></div>
+</main>
+<script>
+const id = new URLSearchParams(location.search).get('id');
+const statusEl = document.getElementById('status');
+const detail = document.getElementById('detail');
+const actions = document.getElementById('actions');
+const money = (n) => new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(n);
+let timer = null;
+
+function row(label, value) {
+  const r = document.createElement('div'); r.className = 'row';
+  const a = document.createElement('span'); a.textContent = label;
+  const b = document.createElement('span'); b.textContent = value;
+  r.append(a, b); return r;
+}
+
+function render(o) {
+  statusEl.textContent = o.statusLabel;
+  statusEl.className = 'muted';
+  detail.replaceChildren(
+    row('Número de pedido', o.id.slice(0, 8).toUpperCase()),
+    row('Modelo', o.product.name),
+    row('Tela', o.product.fabric + ' · ' + o.product.color),
+    row('Patas', o.product.legs),
+    row('Lado', o.product.side),
+    row('Total', money(o.total)),
+    row(o.selection.payment === 'Tarjeta de crédito' ? 'Importe a pagar' : 'Seña', money(o.amount)),
+    row('Saldo del sillón', money(o.balance)),
+  );
+  actions.replaceChildren();
+  if (o.transfer) {
+    const box = document.createElement('div'); box.className = 'box';
+    box.textContent = 'Transferí ' + money(o.amount) + ' a: ' + (o.transfer.holder || '') +
+      (o.transfer.bank ? ' · ' + o.transfer.bank : '') + ' · ' + (o.transfer.account || '') +
+      '. Cuando Sophie confirme la acreditación, el estado cambia a Pagado.';
+    actions.append(box);
+  }
+  if (o.checkoutUrl) {
+    const a = document.createElement('a'); a.className = 'btn'; a.href = o.checkoutUrl; a.textContent = 'Pagar con Mercado Pago';
+    actions.append(a);
+  }
+  if (o.status === 'checkout_error') {
+    statusEl.className = 'err';
+    statusEl.textContent = 'No se pudo abrir Mercado Pago. Conservamos el pedido: no repitas el pago, Sophie lo va a revisar.';
+  }
+  const pending = ['pending', 'creating_checkout', 'awaiting_transfer'].includes(o.status);
+  if (!pending && timer) { clearInterval(timer); timer = null; }
+}
+
+async function load() {
+  if (!id) { statusEl.textContent = 'Falta el número de pedido.'; statusEl.className = 'err'; return; }
+  try {
+    const r = await fetch('/api/orders/' + encodeURIComponent(id), { cache: 'no-store' });
+    const o = await r.json();
+    if (!r.ok) { statusEl.textContent = o.error; statusEl.className = 'err'; return; }
+    render(o);
+  } catch {
+    statusEl.textContent = 'No pudimos consultar el pedido. Reintentá en unos segundos.';
+    statusEl.className = 'err';
+  }
+}
+
+const refresh = document.createElement('button');
+refresh.className = 'btn secondary'; refresh.textContent = 'Actualizar estado';
+refresh.onclick = load;
+document.querySelector('main').append(refresh);
+
+load();
+timer = setInterval(load, 15000);
+</script>
+</main>
+</body>
+</html>

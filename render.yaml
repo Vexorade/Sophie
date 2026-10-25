@@ -1,0 +1,43 @@
+# Blueprint de Render: servicio web y base Postgres.
+# Los secretos se cargan en el panel de Render (sync: false), nunca aquí.
+services:
+  - type: web
+    name: sophie-living
+    runtime: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.13.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sophie-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "false"
+      - key: PUBLIC_BASE_URL
+        sync: false
+      - key: ADMIN_USER
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: MERCADO_PAGO_TEST_ACCESS_TOKEN
+        sync: false
+      - key: MERCADO_PAGO_ACCESS_TOKEN
+        sync: false
+      - key: MERCADO_PAGO_LIVE_ENABLED
+        value: "false"
+      - key: MERCADO_PAGO_WEBHOOK_SECRET
+        sync: false
+      - key: SOPHIE_BANK_ACCOUNT
+        sync: false
+      - key: SOPHIE_BANK_HOLDER
+        sync: false
+      - key: SOPHIE_BANK_NAME
+        sync: false
+
+databases:
+  - name: sophie-db
+    plan: basic-256mb

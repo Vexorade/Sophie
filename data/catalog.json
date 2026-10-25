@@ -1,0 +1,168 @@
+{
+  "models": [
+    {
+      "name": "Esquinero brazo continuo",
+      "size": "2,10 × 1,60 × 0,90 m"
+    },
+    {
+      "name": "Sofá Classic · 3 cuerpos",
+      "size": "2,10 × 0,90 m"
+    },
+    {
+      "name": "Sofá cama",
+      "size": "1,80 × 0,90 m · cama 1,80 × 1,40 m"
+    },
+    {
+      "name": "Esquinero clásico · 3 cuerpos",
+      "size": "2,10 × 1,50 × 0,90 m"
+    },
+    {
+      "name": "Luxury Panamá Tussor",
+      "size": "3,45 × 2,20 × 1,00 m"
+    },
+    {
+      "name": "Esquinero multiposición",
+      "size": "3,90 × 1,60 × 1,80 m"
+    },
+    {
+      "name": "Esquinero clásico · 1,80 m",
+      "size": "1,80 × 1,60 × 0,90 m"
+    },
+    {
+      "name": "Esquinero clásico · 6 cuerpos",
+      "size": "2,80 × 1,80 × 1,70 × 0,90 m"
+    },
+    {
+      "name": "Esquinero doble · 6 cuerpos",
+      "size": "2,80 × 1,70 × 1,70 × 0,90 m"
+    },
+    {
+      "name": "Esquinero clásico · 2,50 m",
+      "size": "2,50 × 1,60 × 0,90 m"
+    },
+    {
+      "name": "Esquinero Mediterráneo",
+      "size": "2,10 × 1,60 × 0,90 m"
+    },
+    {
+      "name": "Sofá Modern · 3 cuerpos",
+      "size": "2,10 × 0,90 m"
+    },
+    {
+      "name": "Sofá Classic · 2 cuerpos · 1,80 m",
+      "size": "1,80 × 0,90 m"
+    },
+    {
+      "name": "Sofá Classic · 2 cuerpos · 1,60 m",
+      "size": "1,60 × 0,90 m"
+    },
+    {
+      "name": "Sofá Classic · 2 cuerpos · 1,40 m",
+      "size": "1,40 × 0,80 m"
+    }
+  ],
+  "prices": [
+    {
+      "cash": 735890,
+      "credit": 986890
+    },
+    {
+      "cash": 525890,
+      "credit": 709374
+    },
+    {
+      "cash": 735890,
+      "credit": 986890
+    },
+    {
+      "cash": 685890,
+      "credit": 953389
+    },
+    {
+      "cash": 1824890,
+      "credit": 2456177
+    },
+    {
+      "cash": 1025890,
+      "credit": 1370387
+    },
+    {
+      "cash": 525890,
+      "credit": 709890
+    },
+    {
+      "cash": 985890,
+      "credit": 1389525
+    },
+    {
+      "cash": 945890,
+      "credit": 1234536
+    },
+    {
+      "cash": 845890,
+      "credit": 1147890
+    },
+    {
+      "cash": 785890,
+      "credit": 1053890
+    },
+    {
+      "cash": 525890,
+      "credit": 709374
+    },
+    {
+      "cash": 425890,
+      "credit": 563206
+    },
+    {
+      "cash": 385890,
+      "credit": 504826
+    },
+    {
+      "cash": 325890,
+      "credit": 452987
+    }
+  ],
+  "shot": [
+    "Antique",
+    "Mastic",
+    "Stone",
+    "Mustang",
+    "Piedra",
+    "Onyx",
+    "Nickel",
+    "Black",
+    "Perla",
+    "Latte",
+    "Bronze",
+    "Gold",
+    "Green",
+    "Pine",
+    "Pink",
+    "Mexican",
+    "Morado",
+    "Cheek"
+  ],
+  "best": [
+    "Grey Pepper",
+    "Graphite",
+    "Coral",
+    "Grass",
+    "Blue",
+    "Peach",
+    "Gold",
+    "Olive",
+    "Vison",
+    "Sand",
+    "Champagne",
+    "Pearl",
+    "Natural",
+    "Stone",
+    "Steel"
+  ],
+  "legs": {
+    "wood": "Clásicas de madera",
+    "ball": "Bocha",
+    "aluminum": "Taco de aluminio"
+  }
+}
